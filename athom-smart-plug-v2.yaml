@@ -1,39 +1,39 @@
 substitutions:
   name: "athom-smart-plug-v2"
-  friendly_name: "Perro Guardian de los Arranz"
+  friendly_name: "Perro Guardian"
   room: ""
-  device_description: "Perro Guardian de los Arranz - Mario Arranz Florencio"
-  project_name: "Mario Arranz Florencio.Perro Guardian"
+  device_description: "Perro Guardian"
+  project_name: "Perro Guardian"
   project_version: "v1.0.0"
   sensor_update_interval: "10s"
   relay_restore_mode: RESTORE_DEFAULT_ON
-  # Current Limit in Amps. AU Plug = 10. IL, BR, EU, UK, US Plug = 16.
-  current_limit : "16"
-  # Define a domain for this device to use. i.e. iot.home.lan (so device will appear as athom-smart-plug-v2.iot.home.lan in DNS/DHCP logs)
+  # Límite de corriente en amperios. Enchufe AU = 10. IL, BR, EU, UK, US = 16.
+  current_limit: 16
+  # Definir un dominio para este dispositivo. p.ej. iot.home.lan (el dispositivo aparecerá como athom-smart-plug-v2.iot.home.lan en los registros DNS/DHCP)
   dns_domain: ".local"
-  # Set timezone of the smart plug. Useful if the plug is in a location different to the HA server. Can be entered in unix Country/Area format (i.e. "Australia/Sydney")
+  # Establecer la zona horaria del enchufe inteligente. Útil si el enchufe está en una ubicación diferente al servidor HA. Se puede introducir en formato Unix Country/Area (p.ej. "Australia/Sydney")
   timezone: ""
-  # Set the duration between the sntp service polling ntp.org servers for an update
+  # Establecer la duración entre sondeos del servicio SNTP a los servidores ntp.org para actualizarse
   sntp_update_interval: "6h"
-  # Network time servers for your region, enter from lowest to highest priority. To use local servers update as per zones or countries at: https://www.ntppool.org/zone/@
+  # Servidores de tiempo de red para su región, introducir de menor a mayor prioridad. Para usar servidores locales actualice según zonas o países en: https://www.ntppool.org/zone/@
   sntp_server_1: "0.pool.ntp.org"
   sntp_server_2: "1.pool.ntp.org"
   sntp_server_3: "2.pool.ntp.org"  
-  # Enables faster network connections, with last connected SSID being connected to and no full scan for SSID being undertaken
-  wifi_fast_connect: "false"
-  # Define logging level: NONE, ERROR, WARN, INFO, DEBUG (Default), VERBOSE, VERY_VERBOSE
+  # Habilita conexiones de red más rápidas, conectando al último SSID conocido y evitando un escaneo completo de SSID
+  wifi_fast_connect: false
+  # Definir el nivel de registro: NONE, ERROR, WARN, INFO, DEBUG (por defecto), VERBOSE, VERY_VERBOSE
   log_level: "INFO"
-  # Enable or disable the use of IPv6 networking on the device
-  ipv6_enable: "false"
-  # Hide the ENERGY sensor that shows kWh consumed, but with no time period associated with it. Resets when device restarted and reflashed.
-  hide_energy_sensor: "false"
-  # Specifies whether pins should be initialised as early as possible to known values. Recommended value is false where switches are involved, as these will toggle when updating the firmware or when restarting the device. Defaults to true.
-  early_pin_init: "true"
-  # Power plug icon selection. Change to reflect the type/country of powr plug in use, this will update the power plug icon shown next to the switch
-  power_plug_type: "power-socket-us"  # Options: power-socket-au | power-socket-ch | power-socket-de | power-socket-eu | power-socket-fr | power-socket-it | power-socket-jp | power-socket-uk | power-socket-us |
+  # Habilitar o deshabilitar el uso de IPv6 en el dispositivo
+  ipv6_enable: false
+  # Ocultar el sensor ENERGY que muestra kWh consumidos, sin periodo de tiempo asociado. Se reinicia al reiniciar o reflashear el dispositivo.
+  hide_energy_sensor: false
+  # Especifica si los pines deben inicializarse lo antes posible con valores conocidos. Se recomienda false cuando hay interruptores, ya que pueden activarse al actualizar el firmware o reiniciar el dispositivo. Por defecto true.
+  early_pin_init: true
+  # Selección del icono del enchufe. Cambie para reflejar el tipo/país del enchufe en uso; esto actualizará el icono mostrado junto al interruptor
+  power_plug_type: "power-socket-us"  # Opciones: power-socket-au | power-socket-ch | power-socket-de | power-socket-eu | power-socket-fr | power-socket-it | power-socket-jp | power-socket-uk | power-socket-us |
 
 
-########################## End of Substitutions #########################
+########################## Fin de Sustituciones #########################
 
 esphome:
   name: "${name}"
@@ -96,17 +96,17 @@ logger:
 
 web_server:
   port: 80
-#  version: 3
+#  versión: 3
 
 network:
   enable_ipv6: ${ipv6_enable}
 
 wifi:
-  # This spawns an AP with the device name and mac address with no password.
+  # Esto crea un AP con el nombre del dispositivo y la MAC sin contraseña.
   ap: {}
-  # Allow rapid re-connection to previously connect WiFi SSID, skipping scan of all SSID
+  # Permitir reconexión rápida al SSID previamente conectado, omitiendo el escaneo de todos los SSID
   fast_connect: "${wifi_fast_connect}"
-  # Define dns domain / suffix to add to hostname
+  # Definir dominio/sufijo DNS para añadir al nombre de host
   domain: "${dns_domain}"
 
 mdns:
@@ -117,7 +117,7 @@ captive_portal:
 dashboard_import:
   package_import_url: github://athom-tech/athom-configs/athom-smart-plug-v2.yaml
 
-# Dentra Components - Adds 'Platform - Energy Statistics'
+# Componentes Dentra - Añade 'Platform - Energy Statistics'
 # https://github.com/dentra/esphome-components/tree/master/components/energy_statistics
 # external_components:
 #   - source: github://dentra/esphome-components
@@ -154,15 +154,15 @@ globals:
   - id: total_energy
     type: float
     restore_value: yes
-    initial_value: '0.0'
+    initial_value: 0.0
   - id: restore_mode
     type: int
     restore_value: yes
-    initial_value: "2"      # 0 = Always_Off. 1 = Restore_Power_Off. 2 = Always_On.
+    initial_value: 2      # 0 = Always_Off. 1 = Restore_Power_Off. 2 = Always_On.
   - id: internet_fail_count
     type: int
     restore_value: yes
-    initial_value: '0'
+    initial_value: 0
 
 select:
   - platform: template
@@ -211,14 +211,14 @@ sensor:
     entity_category: diagnostic
     internal: true
 
-  # Reports the WiFi signal strength/RSSI in dB
+  # Informa la intensidad de la señal WiFi/RSSI en dB
   - platform: wifi_signal
     name: "WiFi Signal dB"
     id: wifi_signal_db
     update_interval: 60s
     entity_category: diagnostic
 
-  # Reports the WiFi signal strength in %
+  # Informa la intensidad de la señal WiFi en %
   - platform: copy
     source_id: wifi_signal_db
     name: "WiFi Signal Percent"
@@ -228,16 +228,16 @@ sensor:
     entity_category: diagnostic
     device_class: ""
 
-  # CSE7766 power monitoring chip
+  # Chip de monitorización de potencia CSE7766
   - platform: cse7766
     id: athom_cse7766
     current:
       name: "Current"
-      id: plug_current  # Added ID so we can reference this in other sensors
+  id: plug_current  # ID añadido para poder referenciarlo en otros sensores
       icon: mdi:current-ac
       filters:
         - throttle_average: ${sensor_update_interval}
-        - lambda: if (x < 0.060) return 0.0; else return x;   # For the chip will report less than 3w power when no load is connected
+  - lambda: if (x < 0.060) return 0.0; else return x;   # Porque el chip informará menos de 3 W cuando no hay carga conectada
       on_value_range:
         - above: ${current_limit}
           then:
@@ -245,7 +245,7 @@ sensor:
 
     voltage:
       name: "Voltage"
-      id: plug_voltage  # Added ID so we can reference this in other sensors
+  id: plug_voltage  # ID añadido para poder referenciarlo en otros sensores
       icon: mdi:sine-wave
       filters:
         - throttle_average: ${sensor_update_interval}
@@ -256,7 +256,7 @@ sensor:
       icon: mdi:power
       filters:
         - throttle_average: ${sensor_update_interval}
-        - lambda: if (x < 3.0) return 0.0; else return x;    # For the chip will report less than 3w power when no load is connected
+  - lambda: if (x < 3.0) return 0.0; else return x;    # Porque el chip informará menos de 3 W cuando no hay carga conectada
 
     energy:
       name: "Energy"
@@ -266,7 +266,7 @@ sensor:
       internal: ${hide_energy_sensor}
       filters:
         - throttle: ${sensor_update_interval}
-        # Multiplication factor from W to kW is 0.001
+  # Factor de multiplicación de W a kW es 0.001
         - multiply: 0.001
       on_value:
         then:
@@ -317,32 +317,32 @@ sensor:
     filters:
       - multiply: 0.001
 
-  #    # Dentra Components - Define the id of the sensor providing 'Total Energy' used
+  #    # Componentes Dentra - Defina el id del sensor que proporciona 'Total Energy' usado
   # - platform: "energy_statistics"
   #   total: total_energy_sensor
 
-  #    # Dentra Components - Adds Energy Today. Persistents if restarted, unlike 'total_daily_energy'
+  #    # Componentes Dentra - Añade 'Energy Today'. Persiste si se reinicia, a diferencia de 'total_daily_energy'
   #   energy_today:
   #     name: "Energy Today"
   #     id: total_energy_today
   #     accuracy_decimals: 3
   #     icon: mdi:hours-24
 
-  #    # Dentra Components - Adds Energy Yesterday
+  #    # Componentes Dentra - Añade 'Energy Yesterday'
   #   energy_yesterday:
   #     name: "Total Energy Yesterday"
   #     id: total_energy_yesterday
   #     icon: mdi:calendar-today
   #     accuracy_decimals: 3
 
-  #    # Dentra Components - Adds Energy Week
+  #    # Componentes Dentra - Añade 'Energy Week'
   #   energy_week:
   #     name: "Total Energy Week"
   #     id: total_energy_week
   #     icon: mdi:calendar-week
   #     accuracy_decimals: 3
 
-  #    # Dentra Components - Adds Energy Month
+  #    # Componentes Dentra - Añade 'Energy Month'
   #   energy_month:
   #     name: "Total Energy Month"
   #     id: total_energy_month
@@ -397,7 +397,7 @@ text_sensor:
       icon: mdi:network-pos
       entity_category: diagnostic
 
-  #  Creates a sensor showing when the device was last restarted
+  #  Crea un sensor que muestra cuándo se reinició por última vez el dispositivo
   - platform: template
     name: 'Last Restart'
     id: device_last_restart
@@ -405,7 +405,7 @@ text_sensor:
     entity_category: diagnostic
 #    device_class: timestamp
 
-  #  Creates a sensor of the uptime of the device, in formatted days, hours, minutes and seconds
+  #  Crea un sensor del tiempo de actividad del dispositivo, en días, horas, minutos y segundos formateados
   - platform: template
     name: "Uptime"
     entity_category: diagnostic
@@ -433,19 +433,19 @@ text_sensor:
 time:
   - platform: sntp
     id: sntp_time
-  # Define the timezone of the device
+  # Definir la zona horaria del dispositivo
     timezone: "${timezone}"
-  # Change sync interval from default 5min to 6 hours (or as set in substitutions)
+  # Cambiar el intervalo de sincronización del valor por defecto 5min a 6 horas (o según lo establecido en substitutions)
     update_interval: ${sntp_update_interval}
-  # Set specific sntp servers to use
+  # Establecer servidores SNTP específicos a usar
     servers: 
       - "${sntp_server_1}"
       - "${sntp_server_2}"
       - "${sntp_server_3}"    
-  # Publish the time the device was last restarted
+  # Publicar la hora en que el dispositivo se reinició por última vez
     on_time_sync:
       then:
-        # Update last restart time, but only once.
+  # Actualizar la hora del último reinicio, pero solo una vez.
         - if:
             condition:
               lambda: 'return id(device_last_restart).state == "";'
