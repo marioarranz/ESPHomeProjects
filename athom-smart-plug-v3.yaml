@@ -1,15 +1,14 @@
 substitutions:
   name: "athom-smart-plug-v3"
   friendly_name: "Perro Guardian"
-  room: ""
+  room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
   project_version: "v1.0.0"
   sensor_update_interval: "10s"
-  relay_restore_mode: RESTORE_DEFAULT_ON
   current_limit: "16"
   dns_domain: ".local"
-  timezone: ""
+  timezone: "Europe/London"
   sntp_update_interval: "6h"
   sntp_server_1: "0.pool.ntp.org"
   sntp_server_2: "1.pool.ntp.org"
@@ -34,21 +33,6 @@ esphome:
   on_boot:
     - priority: 600
       then:
-        - select.set_index:
-            id: power_mode
-            index: !lambda |-
-              return id(restore_mode) - 1;
-        - lambda: |-
-            switch (id(restore_mode)) {
-              case 1:
-                id(relay).turn_off();
-                break;
-              case 2:
-                id(relay).turn_on();
-                break;
-              default:
-                break;
-            }
         - lambda: |-
             id(internet_fail_count) = 0;
 
@@ -99,37 +83,40 @@ uart:
   parity: EVEN
 
 interval:
-  - interval: 1min
+  - interval: 30s
     then:
-      - http_request.get:
-          url: http://www.google.com/generate_204
-          on_error:
+      - if:
+          condition:
+            lambda: |-
+              return !wifi::global_wifi_component->is_connected();
+          then:
             - lambda: |-
                 id(internet_fail_count) += 1;
-                ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
-            - if:
-                condition:
-                  lambda: |-
-                    return id(internet_fail_count) >= 3;
-                then:
-                  - logger.log: "Sin internet 3 veces seguidas. Apagando relé y reiniciando en 1 minuto."
-                  - switch.turn_off: relay
-                  - delay: 1min
+                ESP_LOGW("internet_check", "Sin WiFi. Contador=%d", id(internet_fail_count));
+          else:
+            - http_request.get:
+                url: http://clients3.google.com/generate_204
+                on_response:
                   - lambda: |-
-                      App.reboot();
-          on_response:
-            - lambda: |-
-                if (id(internet_fail_count) != 0) {
-                  ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador.");
-                }
-                id(internet_fail_count) = 0;
+                      if (id(internet_fail_count) != 0) {
+                        ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador.");
+                      }
+                      id(internet_fail_count) = 0;
+                on_error:
+                  - lambda: |-
+                      id(internet_fail_count) += 1;
+                      ESP_LOGW("internet_check", "Fallo HTTP. Contador=%d", id(internet_fail_count));
 
-  - interval: 7d
-    then:
-      - switch.turn_off: relay
-      - delay: 1min
-      - lambda: |-
-          App.reboot();
+      - if:
+          condition:
+            lambda: |-
+              return id(internet_fail_count) >= 6;
+          then:
+            - logger.log: "Sin conectividad repetidamente. Apagando relé y reiniciando en 1 minuto."
+            - switch.turn_off: relay
+            - delay: 1min
+            - lambda: |-
+                App.reboot();
 
 globals:
   - id: total_energy
@@ -137,36 +124,10 @@ globals:
     restore_value: yes
     initial_value: '0.0'
 
-  - id: restore_mode
-    type: int
-    restore_value: yes
-    initial_value: '2'  # 1 = Always Off, 2 = Always On, 3 = Restore Power Off State
-
   - id: internet_fail_count
     type: int
     restore_value: no
     initial_value: '0'
-
-select:
-  - platform: template
-    name: "Power On State"
-    id: power_mode
-    optimistic: true
-    icon: mdi:electric-switch
-    options:
-      - Always Off
-      - Always On
-      - Restore Power Off State
-    on_value:
-      then:
-        - lambda: |-
-            if (x == "Always Off") {
-              id(restore_mode) = 1;
-            } else if (x == "Always On") {
-              id(restore_mode) = 2;
-            } else {
-              id(restore_mode) = 3;
-            }
 
 binary_sensor:
   - platform: status
@@ -216,6 +177,14 @@ sensor:
     entity_category: diagnostic
     device_class: ""
 
+  - platform: template
+    name: "Internet Fail Count"
+    lambda: |-
+      return id(internet_fail_count);
+    update_interval: 10s
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
   - platform: cse7766
     id: athom_cse7766
 
@@ -264,7 +233,12 @@ sensor:
           - lambda: |-
               static float previous_energy_value = 0.0;
               float current_energy_value = id(energy).state;
-              id(total_energy) += current_energy_value - previous_energy_value;
+              float delta = current_energy_value - previous_energy_value;
+
+              if (delta >= 0.0) {
+                id(total_energy) += delta;
+              }
+
               previous_energy_value = current_energy_value;
               id(total_energy_sensor).update();
 
@@ -328,7 +302,7 @@ switch:
     name: "Switch"
     pin: GPIO5
     id: relay
-    restore_mode: ${relay_restore_mode}
+    restore_mode: ALWAYS_ON
     icon: mdi:${power_plug_type}
 
 light:
@@ -377,7 +351,7 @@ text_sensor:
       char buffer[32];
 
       if (days > 3650) {
-        return {"Starting up"};
+        return std::string("Starting up");
       } else if (days) {
         snprintf(buffer, sizeof(buffer), "%dd %dh %dm %ds", days, hours, minutes, seconds);
         return {buffer};
@@ -413,3 +387,14 @@ time:
                   id: device_last_restart
                   state: !lambda |-
                     return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 3
+        days_of_week: SUN
+        then:
+          - logger.log: "Reinicio programado semanal: domingo 03:00."
+          - switch.turn_off: relay
+          - delay: 1min
+          - lambda: |-
+              App.reboot();
