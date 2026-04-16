@@ -3,7 +3,7 @@ substitutions:
   friendly_name: "Perro Guardian"
   room: ""
   device_description: "Perro Guardian"
-  project_name: "Perro Guardian"
+  project_name: "MarioArranz.PerroGuardian"
   project_version: "v1.0.0"
   sensor_update_interval: "10s"
   relay_restore_mode: RESTORE_DEFAULT_ON
@@ -84,6 +84,7 @@ preferences:
 
 http_request:
   timeout: 10s
+  verify_ssl: false
 
 api:
 
@@ -105,9 +106,11 @@ wifi:
   # Esto crea un AP con el nombre del dispositivo y la MAC sin contraseña.
   ap: {}
   # Permitir reconexión rápida al SSID previamente conectado, omitiendo el escaneo de todos los SSID
-  fast_connect: "${wifi_fast_connect}"
+  fast_connect: ${wifi_fast_connect}
   # Definir dominio/sufijo DNS para añadir al nombre de host
   domain: "${dns_domain}"
+  # Define el modo mínimo de autenticación WiFi aceptado. Use WPA2 si su router lo soporta.
+  min_auth_mode: WPA2
 
 mdns:
   disabled: false
@@ -142,27 +145,27 @@ interval:
           then:
             - switch.turn_off: relay
             - delay: 1min
-            - lambda: 'esphome::app.reboot();'
+            - lambda: 'App.reboot();'
 
   - interval: 7d
     then:
       - switch.turn_off: relay
       - delay: 1min
-      - lambda: 'esphome::app.reboot();'
+      - lambda: 'App.reboot();'
 
 globals:
   - id: total_energy
     type: float
     restore_value: yes
-    initial_value: 0.0
+    initial_value: '0.0'
   - id: restore_mode
     type: int
     restore_value: yes
-    initial_value: 2      # 0 = Always_Off. 1 = Restore_Power_Off. 2 = Always_On.
+    initial_value: '2'      # 0 = Always_Off. 1 = Restore_Power_Off. 2 = Always_On.
   - id: internet_fail_count
     type: int
     restore_value: yes
-    initial_value: 0
+    initial_value: '0'
 
 select:
   - platform: template
@@ -233,11 +236,11 @@ sensor:
     id: athom_cse7766
     current:
       name: "Current"
-  id: plug_current  # ID añadido para poder referenciarlo en otros sensores
+      id: plug_current  # ID añadido para poder referenciarlo en otros sensores
       icon: mdi:current-ac
       filters:
         - throttle_average: ${sensor_update_interval}
-  - lambda: if (x < 0.060) return 0.0; else return x;   # Porque el chip informará menos de 3 W cuando no hay carga conectada
+        - lambda: if (x < 0.060) return 0.0; else return x;   # Porque el chip informará menos de 3 W cuando no hay carga conectada
       on_value_range:
         - above: ${current_limit}
           then:
@@ -245,7 +248,7 @@ sensor:
 
     voltage:
       name: "Voltage"
-  id: plug_voltage  # ID añadido para poder referenciarlo en otros sensores
+      id: plug_voltage  # ID añadido para poder referenciarlo en otros sensores
       icon: mdi:sine-wave
       filters:
         - throttle_average: ${sensor_update_interval}
@@ -256,7 +259,7 @@ sensor:
       icon: mdi:power
       filters:
         - throttle_average: ${sensor_update_interval}
-  - lambda: if (x < 3.0) return 0.0; else return x;    # Porque el chip informará menos de 3 W cuando no hay carga conectada
+        - lambda: if (x < 3.0) return 0.0; else return x;    # Porque el chip informará menos de 3 W cuando no hay carga conectada
 
     energy:
       name: "Energy"
