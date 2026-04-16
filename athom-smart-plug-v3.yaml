@@ -284,7 +284,7 @@ switch:
     name: "Switch"
     pin: GPIO5
     id: relay
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: ALWAYS_ON
     icon: mdi:${power_plug_type}
 
 light:
@@ -333,7 +333,7 @@ text_sensor:
       char buffer[32];
 
       if (days > 3650) {
-        return {"Starting up"};
+        return std::string("Starting up");
       } else if (days) {
         snprintf(buffer, sizeof(buffer), "%dd %dh %dm %ds", days, hours, minutes, seconds);
         return {buffer};
@@ -368,7 +368,7 @@ time:
               - text_sensor.template.publish:
                   id: device_last_restart
                   state: !lambda |-
-                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p")
+                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
     on_time:
       - seconds: 0
         minutes: 0
