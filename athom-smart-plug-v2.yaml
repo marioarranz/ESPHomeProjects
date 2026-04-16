@@ -73,6 +73,9 @@ esphome:
 
 esp32:
   board: esp32c3-devkitm-1
+  variant: esp32c3
+  framework:
+    type: esp-idf
 
 preferences:
   flash_write_interval: 5min
@@ -365,7 +368,10 @@ button:
 switch:
   - platform: gpio
     name: "Switch"
-    pin: GPIO12
+    # GPIO12 on many ESP32-C3 devkits is used by SPI/PSRAM (SPIHD) and can't be used for GPIOs.
+    # Changed to GPIO4 which is commonly available on C3 devkits. If your relay is wired
+    # to a different pin, update this accordingly.
+    pin: GPIO4
     id: relay
     restore_mode: ${relay_restore_mode}
     icon: mdi:${power_plug_type}
