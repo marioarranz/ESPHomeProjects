@@ -17,7 +17,6 @@ substitutions:
   log_level: "INFO"
   ipv6_enable: "false"
   hide_energy_sensor: "false"
-  early_pin_init: "true"
   power_plug_type: "power-socket-us"
 
 esphome:
@@ -49,6 +48,7 @@ http_request:
   verify_ssl: false
 
 api:
+  reboot_timeout: 0s
 
 ota:
   - platform: esphome
@@ -87,13 +87,8 @@ interval:
     then:
       - if:
           condition:
-            lambda: |-
-              return !wifi::global_wifi_component->is_connected();
+            wifi.connected:
           then:
-            - lambda: |-
-                id(internet_fail_count) += 1;
-                ESP_LOGW("internet_check", "Sin WiFi. Contador=%d", id(internet_fail_count));
-          else:
             - http_request.get:
                 url: http://clients3.google.com/generate_204
                 on_response:
@@ -106,6 +101,10 @@ interval:
                   - lambda: |-
                       id(internet_fail_count) += 1;
                       ESP_LOGW("internet_check", "Fallo HTTP. Contador=%d", id(internet_fail_count));
+          else:
+            - lambda: |-
+                id(internet_fail_count) += 1;
+                ESP_LOGW("internet_check", "Sin WiFi. Contador=%d", id(internet_fail_count));
 
       - if:
           condition:
@@ -390,10 +389,9 @@ time:
     on_time:
       - seconds: 0
         minutes: 0
-        hours: 3
-        days_of_week: SUN
+        hours: 0
         then:
-          - logger.log: "Reinicio programado semanal: domingo 03:00."
+          - logger.log: "Reinicio programado diario: 00:00."
           - switch.turn_off: relay
           - delay: 1min
           - lambda: |-
