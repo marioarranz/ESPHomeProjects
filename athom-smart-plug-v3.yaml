@@ -106,18 +106,23 @@ interval:
           on_error:
             - lambda: |-
                 id(internet_fail_count) += 1;
+                ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
+            - if:
+                condition:
+                  lambda: |-
+                    return id(internet_fail_count) >= 3;
+                then:
+                  - logger.log: "Sin internet 3 veces seguidas. Apagando relé y reiniciando en 1 minuto."
+                  - switch.turn_off: relay
+                  - delay: 1min
+                  - lambda: |-
+                      App.reboot();
           on_response:
             - lambda: |-
+                if (id(internet_fail_count) != 0) {
+                  ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador.");
+                }
                 id(internet_fail_count) = 0;
-      - if:
-          condition:
-            lambda: |-
-              return id(internet_fail_count) >= 3;
-          then:
-            - switch.turn_off: relay
-            - delay: 1min
-            - lambda: |-
-                App.reboot();
 
   - interval: 7d
     then:
@@ -139,7 +144,7 @@ globals:
 
   - id: internet_fail_count
     type: int
-    restore_value: yes
+    restore_value: no
     initial_value: '0'
 
 select:
@@ -369,16 +374,22 @@ text_sensor:
       int minutes = seconds / 60;
       seconds = seconds % 60;
 
+      char buffer[32];
+
       if (days > 3650) {
         return {"Starting up"};
       } else if (days) {
-        return {(String(days) + "d " + String(hours) + "h " + String(minutes) + "m " + String(seconds) + "s").c_str()};
+        snprintf(buffer, sizeof(buffer), "%dd %dh %dm %ds", days, hours, minutes, seconds);
+        return {buffer};
       } else if (hours) {
-        return {(String(hours) + "h " + String(minutes) + "m " + String(seconds) + "s").c_str()};
+        snprintf(buffer, sizeof(buffer), "%dh %dm %ds", hours, minutes, seconds);
+        return {buffer};
       } else if (minutes) {
-        return {(String(minutes) + "m " + String(seconds) + "s").c_str()};
+        snprintf(buffer, sizeof(buffer), "%dm %ds", minutes, seconds);
+        return {buffer};
       } else {
-        return {(String(seconds) + "s").c_str()};
+        snprintf(buffer, sizeof(buffer), "%ds", seconds);
+        return {buffer};
       }
     icon: mdi:clock-start
 
