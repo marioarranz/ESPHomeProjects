@@ -1,15 +1,14 @@
 substitutions:
   name: "athom-smart-plug-v3"
   friendly_name: "Perro Guardian"
-  room: ""
+  room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
   project_version: "v1.0.0"
   sensor_update_interval: "10s"
-  relay_restore_mode: RESTORE_DEFAULT_ON
   current_limit: "16"
   dns_domain: ".local"
-  timezone: ""
+  timezone: "Europe/London"
   sntp_update_interval: "6h"
   sntp_server_1: "0.pool.ntp.org"
   sntp_server_2: "1.pool.ntp.org"
@@ -34,21 +33,6 @@ esphome:
   on_boot:
     - priority: 600
       then:
-        - select.set_index:
-            id: power_mode
-            index: !lambda |-
-              return id(restore_mode) - 1;
-        - lambda: |-
-            switch (id(restore_mode)) {
-              case 1:
-                id(relay).turn_off();
-                break;
-              case 2:
-                id(relay).turn_on();
-                break;
-              default:
-                break;
-            }
         - lambda: |-
             id(internet_fail_count) = 0;
 
@@ -102,7 +86,7 @@ interval:
   - interval: 1min
     then:
       - http_request.get:
-          url: http://www.google.com/generate_204
+          url: http://clients3.google.com/generate_204
           on_error:
             - lambda: |-
                 id(internet_fail_count) += 1;
@@ -110,9 +94,9 @@ interval:
             - if:
                 condition:
                   lambda: |-
-                    return id(internet_fail_count) >= 3;
+                    return id(internet_fail_count) >= 5;
                 then:
-                  - logger.log: "Sin internet 3 veces seguidas. Apagando relé y reiniciando en 1 minuto."
+                  - logger.log: "Sin internet 5 veces seguidas. Apagando relé y reiniciando en 1 minuto."
                   - switch.turn_off: relay
                   - delay: 1min
                   - lambda: |-
@@ -124,49 +108,16 @@ interval:
                 }
                 id(internet_fail_count) = 0;
 
-  - interval: 7d
-    then:
-      - switch.turn_off: relay
-      - delay: 1min
-      - lambda: |-
-          App.reboot();
-
 globals:
   - id: total_energy
     type: float
     restore_value: yes
     initial_value: '0.0'
 
-  - id: restore_mode
-    type: int
-    restore_value: yes
-    initial_value: '2'  # 1 = Always Off, 2 = Always On, 3 = Restore Power Off State
-
   - id: internet_fail_count
     type: int
     restore_value: no
     initial_value: '0'
-
-select:
-  - platform: template
-    name: "Power On State"
-    id: power_mode
-    optimistic: true
-    icon: mdi:electric-switch
-    options:
-      - Always Off
-      - Always On
-      - Restore Power Off State
-    on_value:
-      then:
-        - lambda: |-
-            if (x == "Always Off") {
-              id(restore_mode) = 1;
-            } else if (x == "Always On") {
-              id(restore_mode) = 2;
-            } else {
-              id(restore_mode) = 3;
-            }
 
 binary_sensor:
   - platform: status
@@ -264,7 +215,12 @@ sensor:
           - lambda: |-
               static float previous_energy_value = 0.0;
               float current_energy_value = id(energy).state;
-              id(total_energy) += current_energy_value - previous_energy_value;
+              float delta = current_energy_value - previous_energy_value;
+
+              if (delta >= 0.0) {
+                id(total_energy) += delta;
+              }
+
               previous_energy_value = current_energy_value;
               id(total_energy_sensor).update();
 
@@ -328,7 +284,7 @@ switch:
     name: "Switch"
     pin: GPIO5
     id: relay
-    restore_mode: ${relay_restore_mode}
+    restore_mode: RESTORE_DEFAULT_ON
     icon: mdi:${power_plug_type}
 
 light:
@@ -412,4 +368,15 @@ time:
               - text_sensor.template.publish:
                   id: device_last_restart
                   state: !lambda |-
-                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
+                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p")
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 3
+        days_of_week: SUN
+        then:
+          - logger.log: "Reinicio programado semanal: domingo 03:00."
+          - switch.turn_off: relay
+          - delay: 1min
+          - lambda: |-
+              App.reboot();
