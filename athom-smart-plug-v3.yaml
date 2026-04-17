@@ -4,7 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v3.1.0"
+  project_version: "v3.2.0"
 
   sensor_update_interval: "10s"
   current_limit: "16"
@@ -21,11 +21,11 @@ substitutions:
   power_plug_type: "power-socket-us"
 
   # Watchdog
-  internet_check_interval: "30s"
-  internet_fail_threshold: "6"        # 6 x 30s = ~3 min
+  internet_check_interval: "60s"
+  internet_fail_threshold: "3"        # 3 x 60s = ~3 min
   power_cycle_off_time: "1min"
   max_recovery_attempts: "3"
-  cooldown_cycles_after_max: "120"    # 120 x 30s = 60 min
+  cooldown_cycles_after_max: "15"     # 15 x 60s = 15 min
 
   # Test endpoints
   internet_test_dns_url: "http://clients3.google.com/generate_204"
@@ -52,6 +52,8 @@ esphome:
         - lambda: |-
             id(internet_fail_count_dns) = 0;
             id(internet_fail_count_ip) = 0;
+            id(startup_grace_remaining) = 3;
+            id(check_dns_next) = true;
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -74,9 +76,6 @@ ota:
 logger:
   level: ${log_level}
   baud_rate: 0
-
-web_server:
-  port: 80
 
 network:
   enable_ipv6: ${ipv6_enable}
@@ -125,6 +124,16 @@ globals:
     type: int
     restore_value: yes
     initial_value: '0'
+
+  - id: startup_grace_remaining
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: check_dns_next
+    type: bool
+    restore_value: no
+    initial_value: 'true'
 
 sensor:
   - platform: uptime
@@ -309,116 +318,140 @@ interval:
       - if:
           condition:
             lambda: |-
-              return id(cooldown_cycles_remaining) > 0;
+              return id(startup_grace_remaining) > 0;
           then:
             - lambda: |-
-                id(cooldown_cycles_remaining) -= 1;
+                id(startup_grace_remaining) -= 1;
+                id(internet_fail_count_dns) = 0;
+                id(internet_fail_count_ip) = 0;
                 ESP_LOGW(
                   "internet_check",
-                  "En cooldown. Ciclos restantes=%d",
-                  id(cooldown_cycles_remaining)
+                  "Startup grace activo. Ciclos restantes=%d",
+                  id(startup_grace_remaining)
                 );
           else:
             - if:
                 condition:
-                  wifi.connected:
+                  lambda: |-
+                    return id(cooldown_cycles_remaining) > 0;
                 then:
-                  - http_request.get:
-                      url: ${internet_test_dns_url}
-                      on_response:
-                        - lambda: |-
-                            if (id(internet_fail_count_dns) != 0) {
-                              ESP_LOGI("internet_check", "Test DNS recuperado.");
-                            }
-                            id(internet_fail_count_dns) = 0;
+                  - lambda: |-
+                      id(cooldown_cycles_remaining) -= 1;
+                      ESP_LOGW(
+                        "internet_check",
+                        "En cooldown. Ciclos restantes=%d",
+                        id(cooldown_cycles_remaining)
+                      );
+                else:
+                  - if:
+                      condition:
+                        wifi.connected:
+                      then:
+                        - if:
+                            condition:
+                              lambda: |-
+                                return id(check_dns_next);
+                            then:
+                              - http_request.get:
+                                  url: ${internet_test_dns_url}
+                                  on_response:
+                                    - lambda: |-
+                                        if (id(internet_fail_count_dns) != 0) {
+                                          ESP_LOGI("internet_check", "Test DNS recuperado.");
+                                        }
+                                        id(internet_fail_count_dns) = 0;
+                                        id(check_dns_next) = false;
 
-                            if (id(internet_fail_count_ip) == 0) {
-                              if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
-                                ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
-                              }
-                              id(recovery_attempt_count) = 0;
-                              id(cooldown_cycles_remaining) = 0;
-                            }
-                      on_error:
+                                        if (id(internet_fail_count_ip) == 0) {
+                                          if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
+                                            ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
+                                          }
+                                          id(recovery_attempt_count) = 0;
+                                          id(cooldown_cycles_remaining) = 0;
+                                        }
+                                  on_error:
+                                    - lambda: |-
+                                        id(internet_fail_count_dns) += 1;
+                                        id(check_dns_next) = false;
+                                        ESP_LOGW(
+                                          "internet_check",
+                                          "Fallo test DNS. Contador DNS=%d",
+                                          id(internet_fail_count_dns)
+                                        );
+                            else:
+                              - http_request.get:
+                                  url: ${internet_test_ip_url}
+                                  on_response:
+                                    - lambda: |-
+                                        if (id(internet_fail_count_ip) != 0) {
+                                          ESP_LOGI("internet_check", "Test IP directa recuperado.");
+                                        }
+                                        id(internet_fail_count_ip) = 0;
+                                        id(check_dns_next) = true;
+
+                                        if (id(internet_fail_count_dns) == 0) {
+                                          if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
+                                            ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
+                                          }
+                                          id(recovery_attempt_count) = 0;
+                                          id(cooldown_cycles_remaining) = 0;
+                                        }
+                                  on_error:
+                                    - lambda: |-
+                                        id(internet_fail_count_ip) += 1;
+                                        id(check_dns_next) = true;
+                                        ESP_LOGW(
+                                          "internet_check",
+                                          "Fallo test IP directa. Contador IP=%d",
+                                          id(internet_fail_count_ip)
+                                        );
+                      else:
                         - lambda: |-
                             id(internet_fail_count_dns) += 1;
-                            ESP_LOGW(
-                              "internet_check",
-                              "Fallo test DNS. Contador DNS=%d",
-                              id(internet_fail_count_dns)
-                            );
-
-                  - http_request.get:
-                      url: ${internet_test_ip_url}
-                      on_response:
-                        - lambda: |-
-                            if (id(internet_fail_count_ip) != 0) {
-                              ESP_LOGI("internet_check", "Test IP directa recuperado.");
-                            }
-                            id(internet_fail_count_ip) = 0;
-
-                            if (id(internet_fail_count_dns) == 0) {
-                              if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
-                                ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
-                              }
-                              id(recovery_attempt_count) = 0;
-                              id(cooldown_cycles_remaining) = 0;
-                            }
-                      on_error:
-                        - lambda: |-
                             id(internet_fail_count_ip) += 1;
                             ESP_LOGW(
                               "internet_check",
-                              "Fallo test IP directa. Contador IP=%d",
+                              "Sin WiFi. Contador DNS=%d, Contador IP=%d",
+                              id(internet_fail_count_dns),
                               id(internet_fail_count_ip)
                             );
-                else:
-                  - lambda: |-
-                      id(internet_fail_count_dns) += 1;
-                      id(internet_fail_count_ip) += 1;
-                      ESP_LOGW(
-                        "internet_check",
-                        "Sin WiFi. Contador DNS=%d, Contador IP=%d",
-                        id(internet_fail_count_dns),
-                        id(internet_fail_count_ip)
-                      );
 
-            - if:
-                condition:
-                  lambda: |-
-                    return (
-                      id(internet_fail_count_dns) >= atoi("${internet_fail_threshold}") &&
-                      id(internet_fail_count_ip) >= atoi("${internet_fail_threshold}")
-                    );
-                then:
                   - if:
                       condition:
                         lambda: |-
-                          return id(recovery_attempt_count) < atoi("${max_recovery_attempts}");
+                          return (
+                            id(internet_fail_count_dns) >= atoi("${internet_fail_threshold}") &&
+                            id(internet_fail_count_ip) >= atoi("${internet_fail_threshold}")
+                          );
                       then:
-                        - lambda: |-
-                            id(recovery_attempt_count) += 1;
-                            ESP_LOGW(
-                              "internet_recovery",
-                              "Sin conectividad real. Intento de recuperación %d de %d.",
-                              id(recovery_attempt_count),
-                              atoi("${max_recovery_attempts}")
-                            );
-                        - logger.log: "Apagando relé para power cycle."
-                        - switch.turn_off: relay
-                        - delay: ${power_cycle_off_time}
-                        - lambda: |-
-                            App.reboot();
-                      else:
-                        - lambda: |-
-                            id(cooldown_cycles_remaining) = atoi("${cooldown_cycles_after_max}");
-                            id(internet_fail_count_dns) = 0;
-                            id(internet_fail_count_ip) = 0;
-                            ESP_LOGE(
-                              "internet_recovery",
-                              "Máximo de intentos alcanzado. Entrando en cooldown durante %d ciclos.",
-                              id(cooldown_cycles_remaining)
-                            );
+                        - if:
+                            condition:
+                              lambda: |-
+                                return id(recovery_attempt_count) < atoi("${max_recovery_attempts}");
+                            then:
+                              - lambda: |-
+                                  id(recovery_attempt_count) += 1;
+                                  ESP_LOGW(
+                                    "internet_recovery",
+                                    "Sin conectividad real. Intento de recuperación %d de %d.",
+                                    id(recovery_attempt_count),
+                                    atoi("${max_recovery_attempts}")
+                                  );
+                              - logger.log: "Apagando relé para power cycle."
+                              - switch.turn_off: relay
+                              - delay: ${power_cycle_off_time}
+                              - lambda: |-
+                                  App.reboot();
+                            else:
+                              - lambda: |-
+                                  id(cooldown_cycles_remaining) = atoi("${cooldown_cycles_after_max}");
+                                  id(internet_fail_count_dns) = 0;
+                                  id(internet_fail_count_ip) = 0;
+                                  ESP_LOGE(
+                                    "internet_recovery",
+                                    "Máximo de intentos alcanzado. Entrando en cooldown durante %d ciclos.",
+                                    id(cooldown_cycles_remaining)
+                                  );
 
 button:
   - platform: restart
