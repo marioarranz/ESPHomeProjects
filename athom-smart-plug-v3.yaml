@@ -64,7 +64,7 @@ preferences:
   flash_write_interval: 5min
 
 http_request:
-  timeout: 10s
+  timeout: 5s
   verify_ssl: false
 
 api:
@@ -76,6 +76,9 @@ ota:
 logger:
   level: ${log_level}
   baud_rate: 0
+
+web_server:
+  port: 80
 
 network:
   enable_ipv6: ${ipv6_enable}
