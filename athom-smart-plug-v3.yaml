@@ -4,8 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v3.2.0"
-
+  project_version: "v3.1.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -19,19 +18,13 @@ substitutions:
   ipv6_enable: "false"
   hide_energy_sensor: "false"
   power_plug_type: "power-socket-us"
-
-  # Watchdog
   internet_check_interval: "60s"
-  internet_fail_threshold: "3"        # 3 x 60s = ~3 min
+  internet_fail_threshold: "3"
   power_cycle_off_time: "1min"
   max_recovery_attempts: "3"
-  cooldown_cycles_after_max: "15"     # 15 x 60s = 15 min
-
-  # Test endpoints
+  cooldown_cycles_after_max: "15"
   internet_test_dns_url: "http://clients3.google.com/generate_204"
   internet_test_ip_url: "https://1.1.1.1/cdn-cgi/trace"
-
-  # Dashboard import
   dashboard_repo: "marioarranz/ESPHomeProjects"
   dashboard_file: "athom-smart-plug-v3.yaml"
   dashboard_ref: "0b2df4b0f09cd6987fde2cc550be4713ac4a94e4"
@@ -142,14 +135,12 @@ sensor:
   - platform: uptime
     name: "Uptime Sensor"
     id: uptime_sensor
-    entity_category: diagnostic
     internal: true
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
     id: wifi_signal_db
     update_interval: 60s
-    entity_category: diagnostic
 
   - platform: copy
     source_id: wifi_signal_db
@@ -158,40 +149,6 @@ sensor:
       - lambda: |-
           return min(max(2 * (x + 100.0), 0.0), 100.0);
     unit_of_measurement: "%"
-    entity_category: diagnostic
-    device_class: ""
-
-  - platform: template
-    name: "Internet Fail Count DNS"
-    lambda: |-
-      return id(internet_fail_count_dns);
-    update_interval: 10s
-    accuracy_decimals: 0
-    entity_category: diagnostic
-
-  - platform: template
-    name: "Internet Fail Count IP"
-    lambda: |-
-      return id(internet_fail_count_ip);
-    update_interval: 10s
-    accuracy_decimals: 0
-    entity_category: diagnostic
-
-  - platform: template
-    name: "Recovery Attempt Count"
-    lambda: |-
-      return id(recovery_attempt_count);
-    update_interval: 10s
-    accuracy_decimals: 0
-    entity_category: diagnostic
-
-  - platform: template
-    name: "Cooldown Cycles Remaining"
-    lambda: |-
-      return id(cooldown_cycles_remaining);
-    update_interval: 10s
-    accuracy_decimals: 0
-    entity_category: diagnostic
 
   - platform: cse7766
     id: athom_cse7766
@@ -199,121 +156,26 @@ sensor:
     current:
       name: "Current"
       id: plug_current
-      icon: mdi:current-ac
       filters:
         - throttle_average: ${sensor_update_interval}
         - lambda: |-
             if (x < 0.060) return 0.0;
             else return x;
-      on_value_range:
-        - above: ${current_limit}
-          then:
-            - switch.turn_off: relay
 
     voltage:
       name: "Voltage"
       id: plug_voltage
-      icon: mdi:sine-wave
       filters:
         - throttle_average: ${sensor_update_interval}
 
     power:
       name: "Power"
       id: power_sensor
-      icon: mdi:power
       filters:
         - throttle_average: ${sensor_update_interval}
         - lambda: |-
             if (x < 3.0) return 0.0;
             else return x;
-
-    energy:
-      name: "Energy"
-      id: energy
-      icon: mdi:lightning-bolt
-      unit_of_measurement: kWh
-      internal: ${hide_energy_sensor}
-      filters:
-        - throttle: ${sensor_update_interval}
-        - multiply: 0.001
-      on_value:
-        then:
-          - lambda: |-
-              static float previous_energy_value = 0.0;
-              float current_energy_value = id(energy).state;
-              float delta = current_energy_value - previous_energy_value;
-
-              if (delta >= 0.0) {
-                id(total_energy) += delta;
-              }
-
-              previous_energy_value = current_energy_value;
-              id(total_energy_sensor).update();
-
-    apparent_power:
-      name: "Apparent Power"
-      icon: mdi:power
-      filters:
-        - throttle_average: ${sensor_update_interval}
-
-    reactive_power:
-      name: "Reactive Power"
-      icon: mdi:flash
-      filters:
-        - throttle_average: ${sensor_update_interval}
-
-    power_factor:
-      name: "Power Factor"
-      icon: mdi:percent-outline
-      filters:
-        - throttle_average: ${sensor_update_interval}
-
-  - platform: template
-    name: "Total Energy"
-    id: total_energy_sensor
-    unit_of_measurement: kWh
-    device_class: energy
-    state_class: total_increasing
-    icon: mdi:lightning-bolt
-    accuracy_decimals: 3
-    lambda: |-
-      return id(total_energy);
-    update_interval: ${sensor_update_interval}
-
-  - platform: total_daily_energy
-    name: "Total Energy Since Boot"
-    restore: true
-    power_id: power_sensor
-    unit_of_measurement: kWh
-    icon: mdi:hours-24
-    accuracy_decimals: 3
-    filters:
-      - multiply: 0.001
-
-binary_sensor:
-  - platform: status
-    name: "Status"
-    icon: mdi:check-network-outline
-    entity_category: diagnostic
-
-  - platform: gpio
-    pin:
-      number: GPIO3
-      mode: INPUT_PULLUP
-      inverted: true
-    id: power_button
-    name: "Power Button"
-    disabled_by_default: true
-    on_multi_click:
-      - timing:
-          - ON for at most 1s
-          - OFF for at least 0.2s
-        then:
-          - switch.toggle: relay
-      - timing:
-          - ON for at least 4s
-        then:
-          - button.press: Reset
 
 interval:
   - interval: ${internet_check_interval}
@@ -327,149 +189,42 @@ interval:
                 id(startup_grace_remaining) -= 1;
                 id(internet_fail_count_dns) = 0;
                 id(internet_fail_count_ip) = 0;
-                ESP_LOGW(
-                  "internet_check",
-                  "Startup grace activo. Ciclos restantes=%d",
-                  id(startup_grace_remaining)
-                );
+                ESP_LOGW("internet_check", "Startup grace activo. Ciclos restantes=%d", id(startup_grace_remaining));
           else:
             - if:
                 condition:
-                  lambda: |-
-                    return id(cooldown_cycles_remaining) > 0;
+                  wifi.connected:
                 then:
-                  - lambda: |-
-                      id(cooldown_cycles_remaining) -= 1;
-                      ESP_LOGW(
-                        "internet_check",
-                        "En cooldown. Ciclos restantes=%d",
-                        id(cooldown_cycles_remaining)
-                      );
-                else:
-                  - if:
-                      condition:
-                        wifi.connected:
-                      then:
-                        - if:
-                            condition:
-                              lambda: |-
-                                return id(check_dns_next);
-                            then:
-                              - http_request.get:
-                                  url: ${internet_test_dns_url}
-                                  on_response:
-                                    - lambda: |-
-                                        if (id(internet_fail_count_dns) != 0) {
-                                          ESP_LOGI("internet_check", "Test DNS recuperado.");
-                                        }
-                                        id(internet_fail_count_dns) = 0;
-                                        id(check_dns_next) = false;
-
-                                        if (id(internet_fail_count_ip) == 0) {
-                                          if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
-                                            ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
-                                          }
-                                          id(recovery_attempt_count) = 0;
-                                          id(cooldown_cycles_remaining) = 0;
-                                        }
-                                  on_error:
-                                    - lambda: |-
-                                        id(internet_fail_count_dns) += 1;
-                                        id(check_dns_next) = false;
-                                        ESP_LOGW(
-                                          "internet_check",
-                                          "Fallo test DNS. Contador DNS=%d",
-                                          id(internet_fail_count_dns)
-                                        );
-                            else:
-                              - http_request.get:
-                                  url: ${internet_test_ip_url}
-                                  on_response:
-                                    - lambda: |-
-                                        if (id(internet_fail_count_ip) != 0) {
-                                          ESP_LOGI("internet_check", "Test IP directa recuperado.");
-                                        }
-                                        id(internet_fail_count_ip) = 0;
-                                        id(check_dns_next) = true;
-
-                                        if (id(internet_fail_count_dns) == 0) {
-                                          if (id(recovery_attempt_count) != 0 || id(cooldown_cycles_remaining) != 0) {
-                                            ESP_LOGI("internet_check", "Conectividad establecida por ambos tests. Reiniciando contadores.");
-                                          }
-                                          id(recovery_attempt_count) = 0;
-                                          id(cooldown_cycles_remaining) = 0;
-                                        }
-                                  on_error:
-                                    - lambda: |-
-                                        id(internet_fail_count_ip) += 1;
-                                        id(check_dns_next) = true;
-                                        ESP_LOGW(
-                                          "internet_check",
-                                          "Fallo test IP directa. Contador IP=%d",
-                                          id(internet_fail_count_ip)
-                                        );
-                      else:
-                        - lambda: |-
-                            id(internet_fail_count_dns) += 1;
-                            id(internet_fail_count_ip) += 1;
-                            ESP_LOGW(
-                              "internet_check",
-                              "Sin WiFi. Contador DNS=%d, Contador IP=%d",
-                              id(internet_fail_count_dns),
-                              id(internet_fail_count_ip)
-                            );
-
                   - if:
                       condition:
                         lambda: |-
-                          return (
-                            id(internet_fail_count_dns) >= atoi("${internet_fail_threshold}") &&
-                            id(internet_fail_count_ip) >= atoi("${internet_fail_threshold}")
-                          );
+                          return id(check_dns_next);
                       then:
-                        - if:
-                            condition:
-                              lambda: |-
-                                return id(recovery_attempt_count) < atoi("${max_recovery_attempts}");
-                            then:
+                        - http_request.get:
+                            url: ${internet_test_dns_url}
+                            on_response:
                               - lambda: |-
-                                  id(recovery_attempt_count) += 1;
-                                  ESP_LOGW(
-                                    "internet_recovery",
-                                    "Sin conectividad real. Intento de recuperación %d de %d.",
-                                    id(recovery_attempt_count),
-                                    atoi("${max_recovery_attempts}")
-                                  );
-                              - logger.log: "Apagando relé para power cycle."
-                              - switch.turn_off: relay
-                              - delay: ${power_cycle_off_time}
-                              - lambda: |-
-                                  App.reboot();
-                            else:
-                              - lambda: |-
-                                  id(cooldown_cycles_remaining) = atoi("${cooldown_cycles_after_max}");
                                   id(internet_fail_count_dns) = 0;
+                                  id(check_dns_next) = false;
+                            on_error:
+                              - lambda: |-
+                                  id(internet_fail_count_dns) += 1;
+                                  id(check_dns_next) = false;
+                  - if:
+                      condition:
+                        lambda: |-
+                          return !id(check_dns_next);
+                      then:
+                        - http_request.get:
+                            url: ${internet_test_ip_url}
+                            on_response:
+                              - lambda: |-
                                   id(internet_fail_count_ip) = 0;
-                                  ESP_LOGE(
-                                    "internet_recovery",
-                                    "Máximo de intentos alcanzado. Entrando en cooldown durante %d ciclos.",
-                                    id(cooldown_cycles_remaining)
-                                  );
-
-button:
-  - platform: restart
-    name: "Restart"
-    entity_category: config
-
-  - platform: factory_reset
-    name: "Factory Reset"
-    id: Reset
-    entity_category: config
-
-  - platform: safe_mode
-    name: "Safe Mode"
-    internal: false
-    entity_category: config
+                                  id(check_dns_next) = true;
+                            on_error:
+                              - lambda: |-
+                                  id(internet_fail_count_ip) += 1;
+                                  id(check_dns_next) = true;
 
 switch:
   - platform: gpio
@@ -477,100 +232,12 @@ switch:
     pin: GPIO5
     id: relay
     restore_mode: ALWAYS_ON
-    icon: mdi:${power_plug_type}
-
-light:
-  - platform: status_led
-    name: "Status LED"
-    id: blue_led
-    icon: mdi:lightbulb-outline
-    disabled_by_default: true
-    pin:
-      number: GPIO6
-      inverted: true
-
-text_sensor:
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-      icon: mdi:ip-network
-      entity_category: diagnostic
-    ssid:
-      name: "Connected SSID"
-      icon: mdi:wifi-strength-2
-      entity_category: diagnostic
-    mac_address:
-      name: "Mac Address"
-      icon: mdi:network-pos
-      entity_category: diagnostic
-
-  - platform: template
-    name: "Last Restart"
-    id: device_last_restart
-    icon: mdi:clock
-    entity_category: diagnostic
-
-  - platform: template
-    name: "Uptime"
-    entity_category: diagnostic
-    lambda: |-
-      int seconds = (int) id(uptime_sensor).state;
-      int days = seconds / (24 * 3600);
-      seconds = seconds % (24 * 3600);
-      int hours = seconds / 3600;
-      seconds = seconds % 3600;
-      int minutes = seconds / 60;
-      seconds = seconds % 60;
-
-      char buffer[32];
-
-      if (days > 3650) {
-        return std::string("Starting up");
-      } else if (days) {
-        snprintf(buffer, sizeof(buffer), "%dd %dh %dm %ds", days, hours, minutes, seconds);
-        return {buffer};
-      } else if (hours) {
-        snprintf(buffer, sizeof(buffer), "%dh %dm %ds", hours, minutes, seconds);
-        return {buffer};
-      } else if (minutes) {
-        snprintf(buffer, sizeof(buffer), "%dm %ds", minutes, seconds);
-        return {buffer};
-      } else {
-        snprintf(buffer, sizeof(buffer), "%ds", seconds);
-        return {buffer};
-      }
-    icon: mdi:clock-start
 
 time:
   - platform: sntp
     id: sntp_time
     timezone: "${timezone}"
-    update_interval: ${sntp_update_interval}
     servers:
       - "${sntp_server_1}"
       - "${sntp_server_2}"
       - "${sntp_server_3}"
-    on_time_sync:
-      then:
-        - if:
-            condition:
-              lambda: |-
-                return id(device_last_restart).state == "";
-            then:
-              - text_sensor.template.publish:
-                  id: device_last_restart
-                  state: !lambda |-
-                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
-
-    # OPCIONAL: mantenimiento semanal
-    # on_time:
-    #   - seconds: 0
-    #     minutes: 0
-    #     hours: 4
-    #     days_of_week: SUN
-    #     then:
-    #       - logger.log: "Reinicio semanal programado: domingo 04:00."
-    #       - switch.turn_off: relay
-    #       - delay: 1min
-    #       - lambda: |-
-    #           App.reboot();
