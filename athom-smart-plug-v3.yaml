@@ -34,7 +34,7 @@ substitutions:
   # Dashboard import
   dashboard_repo: "marioarranz/ESPHomeProjects"
   dashboard_file: "athom-smart-plug-v3.yaml"
-  dashboard_ref: "ddc6e7919b2971b12851a4816d0669038d7100ec"
+  dashboard_ref: "0b2df4b0f09cd6987fde2cc550be4713ac4a94e4"
 
 esphome:
   name: "${name}"
@@ -524,7 +524,7 @@ time:
               - text_sensor.template.publish:
                   id: device_last_restart
                   state: !lambda |-
-                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p")
+                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
 
     # OPCIONAL: mantenimiento semanal
     # on_time:
