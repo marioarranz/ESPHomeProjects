@@ -4,7 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v4.3.0"
+  project_version: "v4.4.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -35,8 +35,10 @@ esphome:
       then:
         - lambda: |-
             id(internet_fail_count) = 0;
-            id(check_target_index) = -1;
             id(recovery_in_progress) = false;
+            id(check_cycle_in_progress) = false;
+            id(cycle_success_count) = 0;
+            id(cycle_failure_count) = 0;
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -96,31 +98,35 @@ globals:
     restore_value: no
     initial_value: '0'
 
-  - id: check_target_index
-    type: int
-    restore_value: no
-    initial_value: '-1'
-
   - id: recovery_in_progress
     type: bool
     restore_value: no
     initial_value: 'false'
 
-script:
-  - id: connectivity_ok
-    mode: restart
-    then:
-      - lambda: |-
-          if (id(internet_fail_count) != 0) {
-            ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador.");
-          }
-          id(internet_fail_count) = 0;
+  - id: check_cycle_in_progress
+    type: bool
+    restore_value: no
+    initial_value: 'false'
 
+  - id: cycle_success_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: cycle_failure_count
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+script:
   - id: recovery_cycle
     mode: single
     then:
       - lambda: |-
           id(recovery_in_progress) = true;
+          id(check_cycle_in_progress) = false;
+          id(cycle_success_count) = 0;
+          id(cycle_failure_count) = 0;
           ESP_LOGW("internet_check", "Iniciando ciclo de recuperacion: apagando rele durante 1 minuto.");
       - switch.turn_off: relay
       - delay: 1min
@@ -128,28 +134,47 @@ script:
       - lambda: |-
           id(internet_fail_count) = 0;
           id(recovery_in_progress) = false;
+          id(check_cycle_in_progress) = false;
+          id(cycle_success_count) = 0;
+          id(cycle_failure_count) = 0;
           ESP_LOGI("internet_check", "Ciclo de recuperacion completado. Rele encendido y contador reiniciado.");
 
-  - id: connectivity_fail
-    mode: single
+  - id: finalize_check_cycle
+    mode: restart
     then:
+      - lambda: |-
+          id(check_cycle_in_progress) = false;
+          ESP_LOGI(
+            "internet_check",
+            "Fin de ciclo de chequeo. Exitos=%d Fallos=%d",
+            id(cycle_success_count),
+            id(cycle_failure_count)
+          );
+
+          if (id(cycle_failure_count) >= 2) {
+            id(internet_fail_count) += 1;
+            ESP_LOGW(
+              "internet_check",
+              "Ciclo fallido (%d/4). Han fallado %d de 3 endpoints.",
+              id(internet_fail_count),
+              id(cycle_failure_count)
+            );
+          } else {
+            if (id(internet_fail_count) != 0) {
+              ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador de ciclos fallidos.");
+            }
+            id(internet_fail_count) = 0;
+          }
+
+          id(cycle_success_count) = 0;
+          id(cycle_failure_count) = 0;
       - if:
           condition:
             lambda: |-
-              return id(recovery_in_progress);
+              return id(internet_fail_count) >= 4 && !id(recovery_in_progress);
           then:
-            - logger.log: "Fallo de conectividad detectado, pero ya hay un ciclo de recuperacion en progreso."
-          else:
-            - lambda: |-
-                id(internet_fail_count) += 1;
-                ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
-            - if:
-                condition:
-                  lambda: |-
-                    return id(internet_fail_count) >= 5;
-                then:
-                  - logger.log: "Sin internet 5 veces seguidas. Iniciando reciclaje de corriente."
-                  - script.execute: recovery_cycle
+            - logger.log: "Sin internet en 4 ciclos consecutivos (2 de 3 fallidos). Iniciando reciclaje de corriente."
+            - script.execute: recovery_cycle
 
   - id: check_google_204
     mode: restart
@@ -158,26 +183,21 @@ script:
           url: http://clients3.google.com/generate_204
           on_response:
             then:
-              - if:
-                  condition:
-                    lambda: |-
-                      return response->status_code == 204;
-                  then:
-                    - logger.log:
-                        format: "Chequeo Google OK con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_ok
-                  else:
-                    - logger.log:
-                        format: "Chequeo Google falló con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_fail
+              - lambda: |-
+                  if (response->status_code == 204) {
+                    id(cycle_success_count) += 1;
+                    ESP_LOGI("internet_check", "Google OK con HTTP %d.", response->status_code);
+                  } else {
+                    id(cycle_failure_count) += 1;
+                    ESP_LOGW("internet_check", "Google fallo con HTTP %d.", response->status_code);
+                  }
+              - script.execute: check_gstatic_204
           on_error:
             then:
-              - logger.log: "Chequeo Google no accesible."
-              - script.execute: connectivity_fail
+              - lambda: |-
+                  id(cycle_failure_count) += 1;
+                  ESP_LOGW("internet_check", "Google no accesible.");
+              - script.execute: check_gstatic_204
 
   - id: check_gstatic_204
     mode: restart
@@ -186,26 +206,21 @@ script:
           url: http://connectivitycheck.gstatic.com/generate_204
           on_response:
             then:
-              - if:
-                  condition:
-                    lambda: |-
-                      return response->status_code == 204;
-                  then:
-                    - logger.log:
-                        format: "Chequeo Gstatic OK con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_ok
-                  else:
-                    - logger.log:
-                        format: "Chequeo Gstatic falló con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_fail
+              - lambda: |-
+                  if (response->status_code == 204) {
+                    id(cycle_success_count) += 1;
+                    ESP_LOGI("internet_check", "Gstatic OK con HTTP %d.", response->status_code);
+                  } else {
+                    id(cycle_failure_count) += 1;
+                    ESP_LOGW("internet_check", "Gstatic fallo con HTTP %d.", response->status_code);
+                  }
+              - script.execute: check_cloudflare_204
           on_error:
             then:
-              - logger.log: "Chequeo Gstatic no accesible."
-              - script.execute: connectivity_fail
+              - lambda: |-
+                  id(cycle_failure_count) += 1;
+                  ESP_LOGW("internet_check", "Gstatic no accesible.");
+              - script.execute: check_cloudflare_204
 
   - id: check_cloudflare_204
     mode: restart
@@ -214,29 +229,34 @@ script:
           url: http://cp.cloudflare.com/generate_204
           on_response:
             then:
-              - if:
-                  condition:
-                    lambda: |-
-                      return response->status_code == 204;
-                  then:
-                    - logger.log:
-                        format: "Chequeo Cloudflare OK con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_ok
-                  else:
-                    - logger.log:
-                        format: "Chequeo Cloudflare falló con HTTP %d."
-                        args:
-                          - response->status_code
-                    - script.execute: connectivity_fail
+              - lambda: |-
+                  if (response->status_code == 204) {
+                    id(cycle_success_count) += 1;
+                    ESP_LOGI("internet_check", "Cloudflare OK con HTTP %d.", response->status_code);
+                  } else {
+                    id(cycle_failure_count) += 1;
+                    ESP_LOGW("internet_check", "Cloudflare fallo con HTTP %d.", response->status_code);
+                  }
+              - script.execute: finalize_check_cycle
           on_error:
             then:
-              - logger.log: "Chequeo Cloudflare no accesible."
-              - script.execute: connectivity_fail
+              - lambda: |-
+                  id(cycle_failure_count) += 1;
+                  ESP_LOGW("internet_check", "Cloudflare no accesible.");
+              - script.execute: finalize_check_cycle
+
+  - id: start_check_cycle
+    mode: single
+    then:
+      - lambda: |-
+          id(check_cycle_in_progress) = true;
+          id(cycle_success_count) = 0;
+          id(cycle_failure_count) = 0;
+          ESP_LOGI("internet_check", "Iniciando ciclo de chequeo de 3 endpoints.");
+      - script.execute: check_google_204
 
 interval:
-  - interval: 1min
+  - interval: 30s
     then:
       - if:
           condition:
@@ -248,31 +268,21 @@ interval:
             - if:
                 condition:
                   lambda: |-
-                    return id(uptime_sensor).state >= 300;
+                    return id(check_cycle_in_progress);
                 then:
-                  - lambda: |-
-                      id(check_target_index) = (id(check_target_index) + 1) % 3;
-                      ESP_LOGI("internet_check", "Rotacion de chequeo. Endpoint index=%d", id(check_target_index));
+                  - logger.log: "Ya hay un ciclo de chequeo en progreso. Omitiendo este tick."
+                else:
                   - if:
                       condition:
                         lambda: |-
-                          return id(check_target_index) == 0;
+                          return id(uptime_sensor).state >= 300;
                       then:
-                        - script.execute: check_google_204
+                        - script.execute: start_check_cycle
                       else:
-                        - if:
-                            condition:
-                              lambda: |-
-                                return id(check_target_index) == 1;
-                            then:
-                              - script.execute: check_gstatic_204
-                            else:
-                              - script.execute: check_cloudflare_204
-                else:
-                  - logger.log:
-                      format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
-                      args:
-                        - (int) id(uptime_sensor).state
+                        - logger.log:
+                            format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
+                            args:
+                              - (int) id(uptime_sensor).state
 
 binary_sensor:
   - platform: status
@@ -537,4 +547,7 @@ time:
           - lambda: |-
               id(internet_fail_count) = 0;
               id(recovery_in_progress) = false;
-              ESP_LOGI("internet_check", "Reinicio semanal completado. Rele encendido y contador reiniciado.");
+              id(check_cycle_in_progress) = false;
+              id(cycle_success_count) = 0;
+              id(cycle_failure_count) = 0;
+              ESP_LOGI("internet_check", "Reinicio semanal completado. Rele encendido y contadores reiniciados.");
