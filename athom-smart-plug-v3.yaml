@@ -4,7 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v3.1.0"
+  project_version: "v4.0.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -17,17 +17,8 @@ substitutions:
   log_level: "INFO"
   ipv6_enable: "false"
   hide_energy_sensor: "false"
+  early_pin_init: "true"
   power_plug_type: "power-socket-us"
-  internet_check_interval: "60s"
-  internet_fail_threshold: "3"
-  power_cycle_off_time: "1min"
-  max_recovery_attempts: "3"
-  cooldown_cycles_after_max: "15"
-  internet_test_dns_url: "http://clients3.google.com/generate_204"
-  internet_test_ip_url: "https://1.1.1.1/cdn-cgi/trace"
-  dashboard_repo: "marioarranz/ESPHomeProjects"
-  dashboard_file: "athom-smart-plug-v3.yaml"
-  dashboard_ref: "0b2df4b0f09cd6987fde2cc550be4713ac4a94e4"
 
 esphome:
   name: "${name}"
@@ -43,10 +34,8 @@ esphome:
     - priority: 600
       then:
         - lambda: |-
-            id(internet_fail_count_dns) = 0;
-            id(internet_fail_count_ip) = 0;
-            id(startup_grace_remaining) = 3;
-            id(check_dns_next) = true;
+            id(internet_fail_count) = 0;
+            id(check_target_index) = 0;
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -57,11 +46,10 @@ preferences:
   flash_write_interval: 5min
 
 http_request:
-  timeout: 5s
+  timeout: 10s
   verify_ssl: false
 
 api:
-  reboot_timeout: 0s
 
 ota:
   - platform: esphome
@@ -88,7 +76,7 @@ mdns:
 captive_portal:
 
 dashboard_import:
-  package_import_url: github://${dashboard_repo}/${dashboard_file}@${dashboard_ref}
+  package_import_url: github://marioarranz/ESPHomeProjects/version3/athom-smart-plug-v3.yaml
 
 uart:
   rx_pin: GPIO20
@@ -101,46 +89,193 @@ globals:
     restore_value: yes
     initial_value: '0.0'
 
-  - id: internet_fail_count_dns
+  - id: internet_fail_count
     type: int
     restore_value: no
     initial_value: '0'
 
-  - id: internet_fail_count_ip
+  - id: check_target_index
     type: int
     restore_value: no
     initial_value: '0'
 
-  - id: recovery_attempt_count
-    type: int
-    restore_value: yes
-    initial_value: '0'
+script:
+  - id: connectivity_ok
+    mode: restart
+    then:
+      - lambda: |-
+          if (id(internet_fail_count) != 0) {
+            ESP_LOGI("internet_check", "Conectividad recuperada. Reiniciando contador.");
+          }
+          id(internet_fail_count) = 0;
 
-  - id: cooldown_cycles_remaining
-    type: int
-    restore_value: yes
-    initial_value: '0'
+  - id: connectivity_fail
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(uptime_sensor).state < 300;
+          then:
+            - logger.log: "Fallo de conectividad detectado, pero estamos en ventana de gracia de arranque (5 min). No se cuenta ni se reinicia."
+          else:
+            - lambda: |-
+                id(internet_fail_count) += 1;
+                ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
+            - if:
+                condition:
+                  lambda: |-
+                    return id(internet_fail_count) >= 5;
+                then:
+                  - logger.log: "Sin internet 5 veces seguidas. Apagando relé y reiniciando en 1 minuto."
+                  - switch.turn_off: relay
+                  - delay: 1min
+                  - lambda: |-
+                      App.reboot();
 
-  - id: startup_grace_remaining
-    type: int
-    restore_value: no
-    initial_value: '0'
+  - id: check_google_204
+    mode: restart
+    then:
+      - http_request.get:
+          url: http://clients3.google.com/generate_204
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: |-
+                      return response->status_code == 204;
+                  then:
+                    - logger.log:
+                        format: "Chequeo Google OK con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_ok
+                  else:
+                    - logger.log:
+                        format: "Chequeo Google falló con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_fail
+          on_error:
+            then:
+              - logger.log: "Chequeo Google no accesible."
+              - script.execute: connectivity_fail
 
-  - id: check_dns_next
-    type: bool
-    restore_value: no
-    initial_value: 'true'
+  - id: check_gstatic_204
+    mode: restart
+    then:
+      - http_request.get:
+          url: http://connectivitycheck.gstatic.com/generate_204
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: |-
+                      return response->status_code == 204;
+                  then:
+                    - logger.log:
+                        format: "Chequeo Gstatic OK con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_ok
+                  else:
+                    - logger.log:
+                        format: "Chequeo Gstatic falló con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_fail
+          on_error:
+            then:
+              - logger.log: "Chequeo Gstatic no accesible."
+              - script.execute: connectivity_fail
+
+  - id: check_cloudflare_ip
+    mode: restart
+    then:
+      - http_request.get:
+          url: http://1.1.1.1
+          on_response:
+            then:
+              - if:
+                  condition:
+                    lambda: |-
+                      return response->status_code >= 200 && response->status_code < 400;
+                  then:
+                    - logger.log:
+                        format: "Chequeo 1.1.1.1 OK con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_ok
+                  else:
+                    - logger.log:
+                        format: "Chequeo 1.1.1.1 falló con HTTP %d."
+                        args:
+                          - response->status_code
+                    - script.execute: connectivity_fail
+          on_error:
+            then:
+              - logger.log: "Chequeo 1.1.1.1 no accesible."
+              - script.execute: connectivity_fail
+
+interval:
+  - interval: 1min
+    then:
+      - lambda: |-
+          id(check_target_index) = (id(check_target_index) + 1) % 3;
+          ESP_LOGI("internet_check", "Rotacion de chequeo. Endpoint index=%d", id(check_target_index));
+      - if:
+          condition:
+            lambda: |-
+              return id(check_target_index) == 0;
+          then:
+            - script.execute: check_google_204
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(check_target_index) == 1;
+                then:
+                  - script.execute: check_gstatic_204
+                else:
+                  - script.execute: check_cloudflare_ip
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+    icon: mdi:check-network-outline
+    entity_category: diagnostic
+
+  - platform: gpio
+    pin:
+      number: GPIO3
+      mode: INPUT_PULLUP
+      inverted: true
+    id: power_button
+    name: "Power Button"
+    disabled_by_default: true
+    on_multi_click:
+      - timing:
+          - ON for at most 1s
+          - OFF for at least 0.2s
+        then:
+          - switch.toggle: relay
+      - timing:
+          - ON for at least 4s
+        then:
+          - button.press: Reset
 
 sensor:
   - platform: uptime
     name: "Uptime Sensor"
     id: uptime_sensor
+    entity_category: diagnostic
     internal: true
 
   - platform: wifi_signal
     name: "WiFi Signal dB"
     id: wifi_signal_db
     update_interval: 60s
+    entity_category: diagnostic
 
   - platform: copy
     source_id: wifi_signal_db
@@ -149,6 +284,8 @@ sensor:
       - lambda: |-
           return min(max(2 * (x + 100.0), 0.0), 100.0);
     unit_of_measurement: "%"
+    entity_category: diagnostic
+    device_class: ""
 
   - platform: cse7766
     id: athom_cse7766
@@ -156,75 +293,111 @@ sensor:
     current:
       name: "Current"
       id: plug_current
+      icon: mdi:current-ac
       filters:
         - throttle_average: ${sensor_update_interval}
         - lambda: |-
             if (x < 0.060) return 0.0;
             else return x;
+      on_value_range:
+        - above: ${current_limit}
+          then:
+            - switch.turn_off: relay
 
     voltage:
       name: "Voltage"
       id: plug_voltage
+      icon: mdi:sine-wave
       filters:
         - throttle_average: ${sensor_update_interval}
 
     power:
       name: "Power"
       id: power_sensor
+      icon: mdi:power
       filters:
         - throttle_average: ${sensor_update_interval}
         - lambda: |-
             if (x < 3.0) return 0.0;
             else return x;
 
-interval:
-  - interval: ${internet_check_interval}
-    then:
-      - if:
-          condition:
-            lambda: |-
-              return id(startup_grace_remaining) > 0;
-          then:
-            - lambda: |-
-                id(startup_grace_remaining) -= 1;
-                id(internet_fail_count_dns) = 0;
-                id(internet_fail_count_ip) = 0;
-                ESP_LOGW("internet_check", "Startup grace activo. Ciclos restantes=%d", id(startup_grace_remaining));
-          else:
-            - if:
-                condition:
-                  wifi.connected:
-                then:
-                  - if:
-                      condition:
-                        lambda: |-
-                          return id(check_dns_next);
-                      then:
-                        - http_request.get:
-                            url: ${internet_test_dns_url}
-                            on_response:
-                              - lambda: |-
-                                  id(internet_fail_count_dns) = 0;
-                                  id(check_dns_next) = false;
-                            on_error:
-                              - lambda: |-
-                                  id(internet_fail_count_dns) += 1;
-                                  id(check_dns_next) = false;
-                  - if:
-                      condition:
-                        lambda: |-
-                          return !id(check_dns_next);
-                      then:
-                        - http_request.get:
-                            url: ${internet_test_ip_url}
-                            on_response:
-                              - lambda: |-
-                                  id(internet_fail_count_ip) = 0;
-                                  id(check_dns_next) = true;
-                            on_error:
-                              - lambda: |-
-                                  id(internet_fail_count_ip) += 1;
-                                  id(check_dns_next) = true;
+    energy:
+      name: "Energy"
+      id: energy
+      icon: mdi:lightning-bolt
+      unit_of_measurement: kWh
+      internal: ${hide_energy_sensor}
+      filters:
+        - throttle: ${sensor_update_interval}
+        - multiply: 0.001
+      on_value:
+        then:
+          - lambda: |-
+              static float previous_energy_value = 0.0;
+              float current_energy_value = id(energy).state;
+              float delta = current_energy_value - previous_energy_value;
+
+              if (delta >= 0.0) {
+                id(total_energy) += delta;
+              }
+
+              previous_energy_value = current_energy_value;
+              id(total_energy_sensor).update();
+
+    apparent_power:
+      name: "Apparent Power"
+      icon: mdi:power
+      filters:
+        - throttle_average: ${sensor_update_interval}
+
+    reactive_power:
+      name: "Reactive Power"
+      icon: mdi:flash
+      filters:
+        - throttle_average: ${sensor_update_interval}
+
+    power_factor:
+      name: "Power Factor"
+      icon: mdi:percent-outline
+      filters:
+        - throttle_average: ${sensor_update_interval}
+
+  - platform: template
+    name: "Total Energy"
+    id: total_energy_sensor
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    icon: mdi:lightning-bolt
+    accuracy_decimals: 3
+    lambda: |-
+      return id(total_energy);
+    update_interval: ${sensor_update_interval}
+
+  - platform: total_daily_energy
+    name: "Total Energy Since Boot"
+    restore: true
+    power_id: power_sensor
+    unit_of_measurement: kWh
+    icon: mdi:hours-24
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: config
+
+  - platform: factory_reset
+    name: "Factory Reset"
+    id: Reset
+    entity_category: config
+
+  - platform: safe_mode
+    name: "Safe Mode"
+    internal: false
+    entity_category: config
 
 switch:
   - platform: gpio
@@ -232,12 +405,98 @@ switch:
     pin: GPIO5
     id: relay
     restore_mode: ALWAYS_ON
+    icon: mdi:${power_plug_type}
+
+light:
+  - platform: status_led
+    name: "Status LED"
+    id: blue_led
+    icon: mdi:lightbulb-outline
+    disabled_by_default: true
+    pin:
+      number: GPIO6
+      inverted: true
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      icon: mdi:ip-network
+      entity_category: diagnostic
+    ssid:
+      name: "Connected SSID"
+      icon: mdi:wifi-strength-2
+      entity_category: diagnostic
+    mac_address:
+      name: "Mac Address"
+      icon: mdi:network-pos
+      entity_category: diagnostic
+
+  - platform: template
+    name: "Last Restart"
+    id: device_last_restart
+    icon: mdi:clock
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Uptime"
+    entity_category: diagnostic
+    lambda: |-
+      int seconds = (int) id(uptime_sensor).state;
+      int days = seconds / (24 * 3600);
+      seconds = seconds % (24 * 3600);
+      int hours = seconds / 3600;
+      seconds = seconds % 3600;
+      int minutes = seconds / 60;
+      seconds = seconds % 60;
+
+      char buffer[32];
+
+      if (days > 3650) {
+        return std::string("Starting up");
+      } else if (days) {
+        snprintf(buffer, sizeof(buffer), "%dd %dh %dm %ds", days, hours, minutes, seconds);
+        return {buffer};
+      } else if (hours) {
+        snprintf(buffer, sizeof(buffer), "%dh %dm %ds", hours, minutes, seconds);
+        return {buffer};
+      } else if (minutes) {
+        snprintf(buffer, sizeof(buffer), "%dm %ds", minutes, seconds);
+        return {buffer};
+      } else {
+        snprintf(buffer, sizeof(buffer), "%ds", seconds);
+        return {buffer};
+      }
+    icon: mdi:clock-start
 
 time:
   - platform: sntp
     id: sntp_time
     timezone: "${timezone}"
+    update_interval: ${sntp_update_interval}
     servers:
       - "${sntp_server_1}"
       - "${sntp_server_2}"
       - "${sntp_server_3}"
+    on_time_sync:
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(device_last_restart).state == "";
+            then:
+              - text_sensor.template.publish:
+                  id: device_last_restart
+                  state: !lambda |-
+                    return id(sntp_time).now().strftime("%a %d %b %Y - %I:%M:%S %p");
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 23
+        days_of_week: TUE
+        then:
+          - logger.log: "Reinicio programado semanal: Martes 23:00."
+          - switch.turn_off: relay
+          - delay: 1min
+          - lambda: |-
+              App.reboot();
