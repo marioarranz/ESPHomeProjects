@@ -1,10 +1,10 @@
 substitutions:
   name: "athom-smart-plug-v3"
-  friendly_name: "Perro Guardian 4.5.0"
+  friendly_name: "Perro Guardian"
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v4.5.0"
+  project_version: "v4.5.1"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -137,19 +137,9 @@ script:
           ESP_LOGW("internet_check", "Iniciando ciclo de recuperacion: apagando rele durante 1 minuto.");
       - switch.turn_off: relay
       - delay: 1min
-      - switch.turn_on: relay
       - lambda: |-
-          id(internet_fail_count) = 0;
-          id(recovery_in_progress) = false;
-          id(post_recovery_grace_in_progress) = true;
-          id(check_cycle_in_progress) = false;
-          id(cycle_success_count) = 0;
-          id(cycle_failure_count) = 0;
-          ESP_LOGI("internet_check", "Ciclo de recuperacion completado. Rele encendido, contador reiniciado y gracia post-recovery de 4 minutos iniciada.");
-      - delay: 4min
-      - lambda: |-
-          id(post_recovery_grace_in_progress) = false;
-          ESP_LOGI("internet_check", "Ventana de gracia post-recovery finalizada. Se reanudan los chequeos de conectividad.");
+          ESP_LOGI("internet_check", "Minuto de apagado completado. Reiniciando el enchufe para restaurar el rele en ON.");
+          App.reboot();
 
   - id: finalize_check_cycle
     mode: restart
@@ -562,16 +552,6 @@ time:
           - logger.log: "Reinicio programado semanal: lunes 23:00."
           - switch.turn_off: relay
           - delay: 1min
-          - switch.turn_on: relay
           - lambda: |-
-              id(internet_fail_count) = 0;
-              id(recovery_in_progress) = false;
-              id(post_recovery_grace_in_progress) = true;
-              id(check_cycle_in_progress) = false;
-              id(cycle_success_count) = 0;
-              id(cycle_failure_count) = 0;
-              ESP_LOGI("internet_check", "Reinicio semanal completado. Rele encendido y gracia post-recovery de 4 minutos iniciada.");
-          - delay: 4min
-          - lambda: |-
-              id(post_recovery_grace_in_progress) = false;
-              ESP_LOGI("internet_check", "Ventana de gracia post-recovery del reinicio semanal finalizada. Se reanudan los chequeos de conectividad.");
+              ESP_LOGI("internet_check", "Minuto de apagado semanal completado. Reiniciando el enchufe para restaurar el rele en ON.");
+              App.reboot();
