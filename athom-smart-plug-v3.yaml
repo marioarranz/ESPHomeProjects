@@ -4,7 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v4.0.0"
+  project_version: "v4.1.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -35,7 +35,7 @@ esphome:
       then:
         - lambda: |-
             id(internet_fail_count) = 0;
-            id(check_target_index) = 0;
+            id(check_target_index) = -1;
 
 esp32:
   board: esp32-c3-devkitm-1
@@ -97,7 +97,7 @@ globals:
   - id: check_target_index
     type: int
     restore_value: no
-    initial_value: '0'
+    initial_value: '-1'
 
 script:
   - id: connectivity_ok
@@ -112,26 +112,19 @@ script:
   - id: connectivity_fail
     mode: restart
     then:
+      - lambda: |-
+          id(internet_fail_count) += 1;
+          ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
       - if:
           condition:
             lambda: |-
-              return id(uptime_sensor).state < 300;
+              return id(internet_fail_count) >= 5;
           then:
-            - logger.log: "Fallo de conectividad detectado, pero estamos en ventana de gracia de arranque (5 min). No se cuenta ni se reinicia."
-          else:
+            - logger.log: "Sin internet 5 veces seguidas. Apagando relé y reiniciando en 1 minuto."
+            - switch.turn_off: relay
+            - delay: 1min
             - lambda: |-
-                id(internet_fail_count) += 1;
-                ESP_LOGW("internet_check", "Fallo de conectividad. Contador=%d", id(internet_fail_count));
-            - if:
-                condition:
-                  lambda: |-
-                    return id(internet_fail_count) >= 5;
-                then:
-                  - logger.log: "Sin internet 5 veces seguidas. Apagando relé y reiniciando en 1 minuto."
-                  - switch.turn_off: relay
-                  - delay: 1min
-                  - lambda: |-
-                      App.reboot();
+                App.reboot();
 
   - id: check_google_204
     mode: restart
@@ -220,24 +213,34 @@ script:
 interval:
   - interval: 1min
     then:
-      - lambda: |-
-          id(check_target_index) = (id(check_target_index) + 1) % 3;
-          ESP_LOGI("internet_check", "Rotacion de chequeo. Endpoint index=%d", id(check_target_index));
       - if:
           condition:
             lambda: |-
-              return id(check_target_index) == 0;
+              return id(uptime_sensor).state >= 300;
           then:
-            - script.execute: check_google_204
-          else:
+            - lambda: |-
+                id(check_target_index) = (id(check_target_index) + 1) % 3;
+                ESP_LOGI("internet_check", "Rotacion de chequeo. Endpoint index=%d", id(check_target_index));
             - if:
                 condition:
                   lambda: |-
-                    return id(check_target_index) == 1;
+                    return id(check_target_index) == 0;
                 then:
-                  - script.execute: check_gstatic_204
+                  - script.execute: check_google_204
                 else:
-                  - script.execute: check_cloudflare_ip
+                  - if:
+                      condition:
+                        lambda: |-
+                          return id(check_target_index) == 1;
+                      then:
+                        - script.execute: check_gstatic_204
+                      else:
+                        - script.execute: check_cloudflare_ip
+          else:
+            - logger.log:
+                format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
+                args:
+                  - (int) id(uptime_sensor).state
 
 binary_sensor:
   - platform: status
@@ -492,10 +495,10 @@ time:
     on_time:
       - seconds: 0
         minutes: 0
-        hours: 23
-        days_of_week: TUE
+        hours: 3
+        days_of_week: SUN
         then:
-          - logger.log: "Reinicio programado semanal: Martes 23:00."
+          - logger.log: "Reinicio programado semanal: domingo 03:00."
           - switch.turn_off: relay
           - delay: 1min
           - lambda: |-
