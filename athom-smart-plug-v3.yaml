@@ -4,7 +4,7 @@ substitutions:
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v4.1.0"
+  project_version: "v4.2.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -182,32 +182,32 @@ script:
               - logger.log: "Chequeo Gstatic no accesible."
               - script.execute: connectivity_fail
 
-  - id: check_cloudflare_ip
+  - id: check_cloudflare_204
     mode: restart
     then:
       - http_request.get:
-          url: http://1.1.1.1
+          url: http://cp.cloudflare.com/generate_204
           on_response:
             then:
               - if:
                   condition:
                     lambda: |-
-                      return response->status_code >= 200 && response->status_code < 400;
+                      return response->status_code == 204;
                   then:
                     - logger.log:
-                        format: "Chequeo 1.1.1.1 OK con HTTP %d."
+                        format: "Chequeo Cloudflare OK con HTTP %d."
                         args:
                           - response->status_code
                     - script.execute: connectivity_ok
                   else:
                     - logger.log:
-                        format: "Chequeo 1.1.1.1 falló con HTTP %d."
+                        format: "Chequeo Cloudflare falló con HTTP %d."
                         args:
                           - response->status_code
                     - script.execute: connectivity_fail
           on_error:
             then:
-              - logger.log: "Chequeo 1.1.1.1 no accesible."
+              - logger.log: "Chequeo Cloudflare no accesible."
               - script.execute: connectivity_fail
 
 interval:
@@ -235,7 +235,7 @@ interval:
                       then:
                         - script.execute: check_gstatic_204
                       else:
-                        - script.execute: check_cloudflare_ip
+                        - script.execute: check_cloudflare_204
           else:
             - logger.log:
                 format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
@@ -496,9 +496,9 @@ time:
       - seconds: 0
         minutes: 0
         hours: 23
-        days_of_week: TUE
+        days_of_week: MON
         then:
-          - logger.log: "Reinicio programado semanal: domingo 03:00."
+          - logger.log: "Reinicio programado semanal: lunes 23:00."
           - switch.turn_off: relay
           - delay: 1min
           - lambda: |-
