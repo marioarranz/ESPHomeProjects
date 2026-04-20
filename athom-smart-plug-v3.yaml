@@ -495,8 +495,8 @@ time:
     on_time:
       - seconds: 0
         minutes: 0
-        hours: 3
-        days_of_week: SUN
+        hours: 23
+        days_of_week: TUE
         then:
           - logger.log: "Reinicio programado semanal: domingo 03:00."
           - switch.turn_off: relay
