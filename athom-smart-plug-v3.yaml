@@ -1,10 +1,10 @@
 substitutions:
   name: "athom-smart-plug-v3"
-  friendly_name: "Perro Guardian"
+  friendly_name: "Perro Guardian 4.5.0"
   room: "Living Room"
   device_description: "Perro Guardian"
   project_name: "MarioArranz.PerroGuardian"
-  project_version: "v4.4.0"
+  project_version: "v4.5.0"
   sensor_update_interval: "10s"
   current_limit: "16"
   dns_domain: ".local"
@@ -36,6 +36,7 @@ esphome:
         - lambda: |-
             id(internet_fail_count) = 0;
             id(recovery_in_progress) = false;
+            id(post_recovery_grace_in_progress) = false;
             id(check_cycle_in_progress) = false;
             id(cycle_success_count) = 0;
             id(cycle_failure_count) = 0;
@@ -103,6 +104,11 @@ globals:
     restore_value: no
     initial_value: 'false'
 
+  - id: post_recovery_grace_in_progress
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
   - id: check_cycle_in_progress
     type: bool
     restore_value: no
@@ -124,6 +130,7 @@ script:
     then:
       - lambda: |-
           id(recovery_in_progress) = true;
+          id(post_recovery_grace_in_progress) = false;
           id(check_cycle_in_progress) = false;
           id(cycle_success_count) = 0;
           id(cycle_failure_count) = 0;
@@ -134,10 +141,15 @@ script:
       - lambda: |-
           id(internet_fail_count) = 0;
           id(recovery_in_progress) = false;
+          id(post_recovery_grace_in_progress) = true;
           id(check_cycle_in_progress) = false;
           id(cycle_success_count) = 0;
           id(cycle_failure_count) = 0;
-          ESP_LOGI("internet_check", "Ciclo de recuperacion completado. Rele encendido y contador reiniciado.");
+          ESP_LOGI("internet_check", "Ciclo de recuperacion completado. Rele encendido, contador reiniciado y gracia post-recovery de 4 minutos iniciada.");
+      - delay: 4min
+      - lambda: |-
+          id(post_recovery_grace_in_progress) = false;
+          ESP_LOGI("internet_check", "Ventana de gracia post-recovery finalizada. Se reanudan los chequeos de conectividad.");
 
   - id: finalize_check_cycle
     mode: restart
@@ -171,7 +183,7 @@ script:
       - if:
           condition:
             lambda: |-
-              return id(internet_fail_count) >= 4 && !id(recovery_in_progress);
+              return id(internet_fail_count) >= 4 && !id(recovery_in_progress) && !id(post_recovery_grace_in_progress);
           then:
             - logger.log: "Sin internet en 4 ciclos consecutivos (2 de 3 fallidos). Iniciando reciclaje de corriente."
             - script.execute: recovery_cycle
@@ -268,21 +280,28 @@ interval:
             - if:
                 condition:
                   lambda: |-
-                    return id(check_cycle_in_progress);
+                    return id(post_recovery_grace_in_progress);
                 then:
-                  - logger.log: "Ya hay un ciclo de chequeo en progreso. Omitiendo este tick."
+                  - logger.log: "Ventana de gracia post-recovery activa. Omitiendo chequeos de conectividad."
                 else:
                   - if:
                       condition:
                         lambda: |-
-                          return id(uptime_sensor).state >= 300;
+                          return id(check_cycle_in_progress);
                       then:
-                        - script.execute: start_check_cycle
+                        - logger.log: "Ya hay un ciclo de chequeo en progreso. Omitiendo este tick."
                       else:
-                        - logger.log:
-                            format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
-                            args:
-                              - (int) id(uptime_sensor).state
+                        - if:
+                            condition:
+                              lambda: |-
+                                return id(uptime_sensor).state >= 300;
+                            then:
+                              - script.execute: start_check_cycle
+                            else:
+                              - logger.log:
+                                  format: "Ventana de gracia de arranque activa (%d s). Omitiendo chequeos de conectividad."
+                                  args:
+                                    - (int) id(uptime_sensor).state
 
 binary_sensor:
   - platform: status
@@ -547,7 +566,12 @@ time:
           - lambda: |-
               id(internet_fail_count) = 0;
               id(recovery_in_progress) = false;
+              id(post_recovery_grace_in_progress) = true;
               id(check_cycle_in_progress) = false;
               id(cycle_success_count) = 0;
               id(cycle_failure_count) = 0;
-              ESP_LOGI("internet_check", "Reinicio semanal completado. Rele encendido y contadores reiniciados.");
+              ESP_LOGI("internet_check", "Reinicio semanal completado. Rele encendido y gracia post-recovery de 4 minutos iniciada.");
+          - delay: 4min
+          - lambda: |-
+              id(post_recovery_grace_in_progress) = false;
+              ESP_LOGI("internet_check", "Ventana de gracia post-recovery del reinicio semanal finalizada. Se reanudan los chequeos de conectividad.");
